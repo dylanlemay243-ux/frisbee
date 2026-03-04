@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<meta charset="UTF-8">
+<title>Smart Frisbee Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="manifest" href="manifest.json">
+
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+
+<style>
+
+body{
+    font-family: Arial, sans-serif;
+    text-align:center;
+    background:linear-gradient(160deg,#020617,#0f172a);
+    color:white;
+    padding:20px;
+}
+
+h1{
+    font-size:34px;
+    margin-bottom:5px;
+}
+
+.subtitle{
+    color:#94a3b8;
+    margin-bottom:20px;
+}
+
+button{
+    padding:14px 28px;
+    margin:8px;
+    font-size:16px;
+    border:none;
+    border-radius:10px;
+    font-weight:bold;
+    cursor:pointer;
+}
+
+.connect{
+    background:#22c55e;
+}
+
+.download{
+    background:#38bdf8;
+}
+
+.stats{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
+    gap:15px;
+    margin-top:25px;
+}
+
+.card{
+    background:#1e293b;
+    padding:18px;
+    border-radius:12px;
+    width:180px;
+    box-shadow:0 0 12px rgba(0,0,0,0.6);
+}
+
+.cardTitle{
+    font-size:14px;
+    color:#94a3b8;
+}
+
+.cardValue{
+    font-size:28px;
+    margin-top:6px;
+}
+
+.liveRPM{
+    font-size:72px;
+    font-weight:bold;
+    margin-top:20px;
+    color:#22c55e;
+    text-shadow:0 0 20px #22c55e;
+}
+
+.throwCount{
+    margin-top:10px;
+    font-size:16px;
+    color:#94a3b8;
+}
+
+.historyBox{
+    margin-top:30px;
+    background:#1e293b;
+    padding:15px;
+    border-radius:12px;
+    max-width:420px;
+    margin-left:auto;
+    margin-right:auto;
+    height:250px;
+    overflow-y:auto;
+    text-align:left;
+}
+
+.throwRow{
+    border-bottom:1px solid #334155;
+    padding:8px 0;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>🥏 Smart Frisbee</h1>
+<div class="subtitle">Throw Tracker</div>
+
+<button class="connect" onclick="connect()">Connect</button>
+<button class="download" onclick="downloadData()">Download Session</button>
+
+<div class="liveRPM" id="live">--</div>
+<div class="throwCount" id="throwCount">0 Throws</div>
+
+<div class="stats">
+
+<div class="card">
+<div class="cardTitle">Last Throw</div>
+<div class="cardValue" id="last">--</div>
+</div>
+
+<div class="card">
+<div class="cardTitle">Average (5)</div>
+<div class="cardValue" id="avg">--</div>
+</div>
+
+<div class="card">
+<div class="cardTitle">Max Speed</div>
+<div class="cardValue" id="max">--</div>
+</div>
+
+</div>
+
+<div class="historyBox" id="history">
+<b>Throw History</b>
+</div>
+
+<script>
+
+let characteristic;
+let throwHistory=[];
+let lastThrowNumber=0;
+
+async function connect(){
+
+    const device=await navigator.bluetooth.requestDevice({
+        filters:[{name:'SmartFrisbee'}],
+        optionalServices:['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+    });
+
+    const server=await device.gatt.connect();
+
+    const service=await server.getPrimaryService(
+        '4fafc201-1fb5-459e-8fcc-c5c9c331914b'
+    );
+
+    characteristic=await service.getCharacteristic(
+        'beb5483e-36e1-4688-b7f5-ea07361b26a8'
+    );
+
+    await characteristic.startNotifications();
+
+    characteristic.addEventListener(
+        'characteristicvaluechanged',
+        handleData
+    );
+}
+
+function handleData(event){
+
+    let value=new TextDecoder("utf-8")
+        .decode(event.target.value).trim();
+
+    if(!value.includes("LIVE:")) return;
+
+    const parts=value.split("|");
+
+    try{
+
+        const liveRPM=parseFloat(parts[0].split(":")[1]);
+
+        document.getElementById("live").innerText=
+            liveRPM.toFixed(0)+" RPM";
+
+        const throwNum=parseInt(parts[1].split(":")[1]);
+
+        const lastParts=parts[2].split(":")[1].split(",");
+        const lastSpeed=parseFloat(lastParts[0]);
+        const lastRPM=parseFloat(lastParts[1]);
+
+        if(throwNum>0){
+
+            if(lastThrowNumber!==0 && throwNum!==lastThrowNumber+1){
+
+                const missed=throwNum-lastThrowNumber-1;
+
+                for(let i=0;i<missed;i++){
+
+                    addHistory(
+                      "Throw "+(lastThrowNumber+i+1)+" - missed"
+                    );
+                }
+            }
+
+            lastThrowNumber=throwNum;
+
+            document.getElementById("throwCount").innerText=
+                throwNum+" Throws";
+
+            document.getElementById("last").innerText=
+                lastSpeed.toFixed(1)+" mph";
+
+            const avgParts=parts[3].split(":")[1].split(",");
+            const avgSpeed=parseFloat(avgParts[0]);
+
+            document.getElementById("avg").innerText=
+                avgSpeed.toFixed(1)+" mph";
+
+            const maxParts=parts[4].split(":")[1].split(",");
+            const maxSpeed=parseFloat(maxParts[0]);
+
+            document.getElementById("max").innerText=
+                maxSpeed.toFixed(1)+" mph";
+
+            addHistory(
+                "Throw "+throwNum+
+                " — "+lastSpeed.toFixed(1)+" mph / "+
+                lastRPM.toFixed(0)+" rpm"
+            );
+
+            throwHistory.push({
+                throw:throwNum,
+                speed:lastSpeed,
+                rpm:lastRPM
+            });
+        }
+
+    }catch(e){
+
+        console.log("Bad packet:",value);
+    }
+}
+
+function addHistory(text){
+
+    const row=document.createElement("div");
+
+    row.className="throwRow";
+    row.innerText=text;
+
+    const history=document.getElementById("history");
+
+    history.appendChild(row);
+
+    history.scrollTop=history.scrollHeight;
+}
+
+function downloadData(){
+
+    if(throwHistory.length===0){
+        alert("No throws recorded.");
+        return;
+    }
+
+    let csv="Throw,Speed MPH,RPM\n";
+
+    throwHistory.forEach(t=>{
+        csv+=`${t.throw},${t.speed.toFixed(1)},${t.rpm.toFixed(1)}\n`;
+    });
+
+    const blob=new Blob([csv],{type:"text/csv"});
+    const url=URL.createObjectURL(blob);
+
+    const a=document.createElement("a");
+    a.href=url;
+    a.download="frisbee_session.csv";
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+</script>
+
+</body>
+</html>
