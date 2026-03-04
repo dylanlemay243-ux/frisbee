@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html>
 <head>
 
@@ -16,108 +15,118 @@ if ("serviceWorker" in navigator) {
 }
 </script>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
+
 body{
-    font-family: Arial, sans-serif;
-    text-align:center;
-    background:linear-gradient(160deg,#020617,#0f172a);
-    color:white;
-    padding:20px;
+font-family: Arial, sans-serif;
+text-align:center;
+background:linear-gradient(160deg,#020617,#0f172a);
+color:white;
+padding:20px;
 }
 
 h1{
-    font-size:34px;
-    margin-bottom:5px;
+font-size:34px;
+margin-bottom:5px;
 }
 
 .subtitle{
-    color:#94a3b8;
-    margin-bottom:20px;
+color:#94a3b8;
+margin-bottom:20px;
 }
 
 button{
-    padding:14px 28px;
-    margin:8px;
-    font-size:16px;
-    border:none;
-    border-radius:10px;
-    font-weight:bold;
-    cursor:pointer;
+padding:14px 28px;
+margin:8px;
+font-size:16px;
+border:none;
+border-radius:10px;
+font-weight:bold;
+cursor:pointer;
 }
 
 .connect{
-    background:#22c55e;
+background:#22c55e;
 }
 
 .download{
-    background:#38bdf8;
+background:#38bdf8;
 }
 
 .stats{
-    display:flex;
-    flex-wrap:wrap;
-    justify-content:center;
-    gap:15px;
-    margin-top:25px;
+display:flex;
+flex-wrap:wrap;
+justify-content:center;
+gap:15px;
+margin-top:25px;
 }
 
 .card{
-    background:#1e293b;
-    padding:18px;
-    border-radius:12px;
-    width:200px;
-    box-shadow:0 0 12px rgba(0,0,0,0.6);
+background:#1e293b;
+padding:18px;
+border-radius:12px;
+width:200px;
+box-shadow:0 0 12px rgba(0,0,0,0.6);
 }
 
 .cardTitle{
-    font-size:14px;
-    color:#94a3b8;
+font-size:14px;
+color:#94a3b8;
 }
 
 .cardValue{
-    font-size:20px;
-    margin-top:6px;
+font-size:20px;
+margin-top:6px;
 }
 
 .liveRPM{
-    font-size:72px;
-    font-weight:bold;
-    margin-top:20px;
-    color:#22c55e;
-    text-shadow:0 0 20px #22c55e;
+font-size:72px;
+font-weight:bold;
+margin-top:20px;
+color:#22c55e;
+text-shadow:0 0 20px #22c55e;
 }
 
 .throwCount{
-    margin-top:10px;
-    font-size:16px;
-    color:#94a3b8;
+margin-top:10px;
+font-size:16px;
+color:#94a3b8;
 }
 
 .historyBox{
-    margin-top:30px;
-    background:#1e293b;
-    padding:15px;
-    border-radius:12px;
-    max-width:450px;
-    margin-left:auto;
-    margin-right:auto;
-    height:250px;
-    overflow-y:auto;
-    text-align:left;
+margin-top:30px;
+background:#1e293b;
+padding:15px;
+border-radius:12px;
+max-width:450px;
+margin-left:auto;
+margin-right:auto;
+height:250px;
+overflow-y:auto;
+text-align:left;
 }
 
 .throwRow{
-    border-bottom:1px solid #334155;
-    padding:8px 0;
+border-bottom:1px solid #334155;
+padding:8px 0;
+}
+
+.chartBox{
+margin-top:30px;
+max-width:650px;
+margin-left:auto;
+margin-right:auto;
 }
 
 .debug{
-    margin-top:20px;
-    font-size:12px;
-    color:#64748b;
+margin-top:20px;
+font-size:12px;
+color:#64748b;
 }
-</style>
 
+</style>
 </head>
 
 <body>
@@ -125,7 +134,8 @@ button{
 <h1>🥏 Smart Frisbee</h1>
 <div class="subtitle">Throw Tracker</div>
 
-<button class="connect" onclick="connect()">Connect</button> <button class="download" onclick="downloadData()">Download Session</button>
+<button class="connect" onclick="connect()">Connect</button>
+<button class="download" onclick="downloadData()">Download Session</button>
 
 <div class="liveRPM" id="live">-- RPM</div>
 <div class="throwCount" id="throwCount">0 Throws</div>
@@ -149,6 +159,10 @@ button{
 
 </div>
 
+<div class="chartBox">
+<canvas id="speedChart"></canvas>
+</div>
+
 <div class="historyBox" id="history">
 <b>Throw History</b>
 </div>
@@ -161,132 +175,184 @@ let characteristic;
 let throwHistory=[];
 let lastThrowNumber=0;
 
+let speedChart;
+
+function initChart(){
+
+const ctx=document.getElementById('speedChart');
+
+speedChart=new Chart(ctx,{
+type:'line',
+data:{
+labels:[],
+datasets:[{
+label:'Speed MPH',
+data:[],
+borderColor:'#22c55e',
+backgroundColor:'rgba(34,197,94,0.2)',
+tension:0.4,
+pointRadius:5
+}]
+},
+options:{
+responsive:true,
+plugins:{legend:{display:false}},
+scales:{
+x:{ticks:{color:"#94a3b8"}},
+y:{beginAtZero:true,ticks:{color:"#94a3b8"}}
+}
+}
+});
+
+}
+
+initChart();
+
 async function connect(){
 
-    const device=await navigator.bluetooth.requestDevice({
-        filters:[{name:'SmartFrisbee'}],
-        optionalServices:['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
-    });
+const device=await navigator.bluetooth.requestDevice({
+filters:[{name:'SmartFrisbee'}],
+optionalServices:['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+});
 
-    const server=await device.gatt.connect();
+const server=await device.gatt.connect();
 
-    const service=await server.getPrimaryService(
-        '4fafc201-1fb5-459e-8fcc-c5c9c331914b'
-    );
+const service=await server.getPrimaryService(
+'4fafc201-1fb5-459e-8fcc-c5c9c331914b'
+);
 
-    characteristic=await service.getCharacteristic(
-        'beb5483e-36e1-4688-b7f5-ea07361b26a8'
-    );
+characteristic=await service.getCharacteristic(
+'beb5483e-36e1-4688-b7f5-ea07361b26a8'
+);
 
-    await characteristic.startNotifications();
+await characteristic.startNotifications();
 
-    characteristic.addEventListener(
-        'characteristicvaluechanged',
-        handleData
-    );
+characteristic.addEventListener(
+'characteristicvaluechanged',
+handleData
+);
+
 }
 
 function handleData(event){
 
-    let value=new TextDecoder("utf-8")
-        .decode(event.target.value).trim();
+let value=new TextDecoder("utf-8")
+.decode(event.target.value).trim();
 
-    document.getElementById("debug").innerText=value;
+document.getElementById("debug").innerText=value;
 
-    if(!value.includes("LIVE:")) return;
+if(!value.includes("LIVE:")) return;
 
-    const parts=value.split("|");
+const parts=value.split("|");
 
-    try{
+try{
 
-        const liveRPM=parseFloat(parts[0].split(":")[1]);
-        document.getElementById("live").innerText=liveRPM.toFixed(0)+" RPM";
+const liveRPM=parseFloat(parts[0].split(":")[1]);
+document.getElementById("live").innerText=liveRPM.toFixed(0)+" RPM";
 
-        const throwNum=parseInt(parts[1].split(":")[1]);
+const throwNum=parseInt(parts[1].split(":")[1]);
 
-        const lastParts=parts[2].split(":")[1].split(",");
-        const lastSpeed=parseFloat(lastParts[0]);
-        const lastRPM=parseFloat(lastParts[1]);
+const lastParts=parts[2].split(":")[1].split(",");
+const lastSpeed=parseFloat(lastParts[0]);
+const lastRPM=parseFloat(lastParts[1]);
 
-        if(throwNum>0){
+if(throwNum>0){
 
-            lastThrowNumber=throwNum;
+lastThrowNumber=throwNum;
 
-            document.getElementById("throwCount").innerText=
-                throwNum+" Throws";
+document.getElementById("throwCount").innerText=
+throwNum+" Throws";
 
-            document.getElementById("last").innerText=
-                lastSpeed.toFixed(1)+" mph / "+
-                lastRPM.toFixed(0)+" rpm";
+document.getElementById("last").innerText=
+lastSpeed.toFixed(1)+" mph / "+
+lastRPM.toFixed(0)+" rpm";
 
-            const avgParts=parts[3].split(":")[1].split(",");
-            const avgSpeed=parseFloat(avgParts[0]);
-            const avgRPM=parseFloat(avgParts[1]);
+const avgParts=parts[3].split(":")[1].split(",");
+const avgSpeed=parseFloat(avgParts[0]);
+const avgRPM=parseFloat(avgParts[1]);
 
-            document.getElementById("avg").innerText=
-                avgSpeed.toFixed(1)+" mph / "+
-                avgRPM.toFixed(0)+" rpm";
+document.getElementById("avg").innerText=
+avgSpeed.toFixed(1)+" mph / "+
+avgRPM.toFixed(0)+" rpm";
 
-            const maxParts=parts[4].split(":")[1].split(",");
-            const maxSpeed=parseFloat(maxParts[0]);
-            const maxRPM=parseFloat(maxParts[1]);
+const maxParts=parts[4].split(":")[1].split(",");
+const maxSpeed=parseFloat(maxParts[0]);
+const maxRPM=parseFloat(maxParts[1]);
 
-            document.getElementById("max").innerText=
-                maxSpeed.toFixed(1)+" mph / "+
-                maxRPM.toFixed(0)+" rpm";
+document.getElementById("max").innerText=
+maxSpeed.toFixed(1)+" mph / "+
+maxRPM.toFixed(0)+" rpm";
 
-            addHistory(
-                "Throw "+throwNum+
-                " — "+lastSpeed.toFixed(1)+" mph / "+
-                lastRPM.toFixed(0)+" rpm"
-            );
+addHistory(
+"Throw "+throwNum+
+" — "+lastSpeed.toFixed(1)+" mph / "+
+lastRPM.toFixed(0)+" rpm"
+);
 
-            throwHistory.push({
-                throw:throwNum,
-                speed:lastSpeed,
-                rpm:lastRPM
-            });
-        }
+speedChart.data.labels.push("Throw "+throwNum);
+speedChart.data.datasets[0].data.push(lastSpeed);
+speedChart.update();
 
-    }catch(e){
-        console.log("Bad packet:",value);
-    }
+throwHistory.push({
+throw:throwNum,
+speed:lastSpeed,
+rpm:lastRPM
+});
+
+}
+
+}catch(e){
+
+console.log("Bad packet:",value);
+
+}
+
 }
 
 function addHistory(text){
 
-    const row=document.createElement("div");
-    row.className="throwRow";
-    row.innerText=text;
+const row=document.createElement("div");
 
-    const history=document.getElementById("history");
+row.className="throwRow";
+row.innerText=text;
 
-    history.appendChild(row);
-    history.scrollTop=history.scrollHeight;
+const history=document.getElementById("history");
+
+history.appendChild(row);
+
+history.scrollTop=history.scrollHeight;
+
 }
 
 function downloadData(){
 
-    if(throwHistory.length===0){
-        alert("No throws recorded.");
-        return;
-    }
+if(throwHistory.length===0){
 
-    let csv="Throw,Speed MPH,RPM\n";
+alert("No throws recorded.");
+return;
 
-    throwHistory.forEach(t=>{
-        csv+=`${t.throw},${t.speed.toFixed(1)},${t.rpm.toFixed(1)}\n`;
-    });
+}
 
-    const blob=new Blob([csv],{type:"text/csv"});
-    const url=URL.createObjectURL(blob);
+let csv="Throw,Speed MPH,RPM\n";
 
-    const a=document.createElement("a");
-    a.href=url;
-    a.download="frisbee_session.csv";
-    a.click();
+throwHistory.forEach(t=>{
 
-    URL.revokeObjectURL(url);
+csv+=`${t.throw},${t.speed.toFixed(1)},${t.rpm.toFixed(1)}\n`;
+
+});
+
+const blob=new Blob([csv],{type:"text/csv"});
+const url=URL.createObjectURL(blob);
+
+const a=document.createElement("a");
+
+a.href=url;
+a.download="frisbee_session.csv";
+
+a.click();
+
+URL.revokeObjectURL(url);
+
 }
 
 </script>
