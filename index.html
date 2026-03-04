@@ -90,6 +90,13 @@ font-size:16px;
 color:#94a3b8;
 }
 
+.chartBox{
+margin-top:30px;
+max-width:700px;
+margin-left:auto;
+margin-right:auto;
+}
+
 .historyBox{
 margin-top:30px;
 background:#1e293b;
@@ -106,13 +113,6 @@ text-align:left;
 .throwRow{
 border-bottom:1px solid #334155;
 padding:8px 0;
-}
-
-.chartBox{
-margin-top:30px;
-max-width:650px;
-margin-left:auto;
-margin-right:auto;
 }
 
 .debug{
@@ -159,7 +159,13 @@ color:#64748b;
 </div>
 
 <div class="chartBox">
+
+<h3>Throw Speed (MPH)</h3>
 <canvas id="speedChart"></canvas>
+
+<h3 style="margin-top:40px;">Throw Spin (RPM)</h3>
+<canvas id="rpmChart"></canvas>
+
 </div>
 
 <div class="historyBox" id="history">
@@ -175,6 +181,7 @@ let throwHistory=[];
 let lastThrowNumber=0;
 
 let speedChart;
+let rpmChart;
 let rpmGauge;
 
 function initGauge(){
@@ -206,16 +213,17 @@ rpmGauge.set(0);
 
 }
 
-function initChart(){
+function initCharts(){
 
-const ctx=document.getElementById('speedChart');
+const speedCtx=document.getElementById('speedChart');
+const rpmCtx=document.getElementById('rpmChart');
 
-speedChart=new Chart(ctx,{
+speedChart=new Chart(speedCtx,{
 type:'line',
 data:{
 labels:[],
 datasets:[{
-label:'Speed MPH',
+label:'Speed (MPH)',
 data:[],
 borderColor:'#22c55e',
 backgroundColor:'rgba(34,197,94,0.2)',
@@ -225,10 +233,47 @@ pointRadius:5
 },
 options:{
 responsive:true,
-plugins:{legend:{display:false}},
+plugins:{legend:{display:true}},
 scales:{
-x:{ticks:{color:"#94a3b8"}},
-y:{beginAtZero:true,ticks:{color:"#94a3b8"}}
+x:{
+title:{display:true,text:"Throw Number"},
+ticks:{color:"#94a3b8"}
+},
+y:{
+title:{display:true,text:"MPH"},
+beginAtZero:true,
+ticks:{color:"#94a3b8"}
+}
+}
+}
+});
+
+rpmChart=new Chart(rpmCtx,{
+type:'line',
+data:{
+labels:[],
+datasets:[{
+label:'Spin (RPM)',
+data:[],
+borderColor:'#38bdf8',
+backgroundColor:'rgba(56,189,248,0.2)',
+tension:0.4,
+pointRadius:5
+}]
+},
+options:{
+responsive:true,
+plugins:{legend:{display:true}},
+scales:{
+x:{
+title:{display:true,text:"Throw Number"},
+ticks:{color:"#94a3b8"}
+},
+y:{
+title:{display:true,text:"RPM"},
+beginAtZero:true,
+ticks:{color:"#94a3b8"}
+}
 }
 }
 });
@@ -236,7 +281,7 @@ y:{beginAtZero:true,ticks:{color:"#94a3b8"}}
 }
 
 initGauge();
-initChart();
+initCharts();
 
 async function connect(){
 
@@ -326,6 +371,10 @@ speedChart.data.labels.push("Throw "+throwNum);
 speedChart.data.datasets[0].data.push(lastSpeed);
 speedChart.update();
 
+rpmChart.data.labels.push("Throw "+throwNum);
+rpmChart.data.datasets[0].data.push(lastRPM);
+rpmChart.update();
+
 throwHistory.push({
 throw:throwNum,
 speed:lastSpeed,
@@ -350,6 +399,7 @@ row.innerText=text;
 const history=document.getElementById("history");
 
 history.appendChild(row);
+
 history.scrollTop=history.scrollHeight;
 
 }
