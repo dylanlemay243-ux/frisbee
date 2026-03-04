@@ -6,12 +6,13 @@
 <meta charset="UTF-8">
 <title>Smart Frisbee Tracker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#22c55e">
 
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="/frisbee/manifest.json">
 
 <script>
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("service-worker.js");
+  navigator.serviceWorker.register("/frisbee/service-worker.js");
 }
 </script>
 
@@ -64,7 +65,7 @@ button{
     background:#1e293b;
     padding:18px;
     border-radius:12px;
-    width:180px;
+    width:200px;
     box-shadow:0 0 12px rgba(0,0,0,0.6);
 }
 
@@ -74,7 +75,7 @@ button{
 }
 
 .cardValue{
-    font-size:22px;
+    font-size:20px;
     margin-top:6px;
 }
 
@@ -97,7 +98,7 @@ button{
     background:#1e293b;
     padding:15px;
     border-radius:12px;
-    max-width:420px;
+    max-width:450px;
     margin-left:auto;
     margin-right:auto;
     height:250px;
@@ -111,9 +112,9 @@ button{
 }
 
 .debug{
-    margin-top:15px;
+    margin-top:20px;
     font-size:12px;
-    color:#94a3b8;
+    color:#64748b;
 }
 </style>
 
@@ -126,7 +127,7 @@ button{
 
 <button class="connect" onclick="connect()">Connect</button> <button class="download" onclick="downloadData()">Download Session</button>
 
-<div class="liveRPM" id="live">--</div>
+<div class="liveRPM" id="live">-- RPM</div>
 <div class="throwCount" id="throwCount">0 Throws</div>
 
 <div class="stats">
@@ -199,9 +200,7 @@ function handleData(event){
     try{
 
         const liveRPM=parseFloat(parts[0].split(":")[1]);
-
-        document.getElementById("live").innerText=
-            liveRPM.toFixed(0)+" RPM";
+        document.getElementById("live").innerText=liveRPM.toFixed(0)+" RPM";
 
         const throwNum=parseInt(parts[1].split(":")[1]);
 
@@ -210,18 +209,6 @@ function handleData(event){
         const lastRPM=parseFloat(lastParts[1]);
 
         if(throwNum>0){
-
-            if(lastThrowNumber!==0 && throwNum!==lastThrowNumber+1){
-
-                const missed=throwNum-lastThrowNumber-1;
-
-                for(let i=0;i<missed;i++){
-
-                    addHistory(
-                      "Throw "+(lastThrowNumber+i+1)+" - missed"
-                    );
-                }
-            }
 
             lastThrowNumber=throwNum;
 
@@ -262,7 +249,6 @@ function handleData(event){
         }
 
     }catch(e){
-
         console.log("Bad packet:",value);
     }
 }
@@ -270,14 +256,12 @@ function handleData(event){
 function addHistory(text){
 
     const row=document.createElement("div");
-
     row.className="throwRow";
     row.innerText=text;
 
     const history=document.getElementById("history");
 
     history.appendChild(row);
-
     history.scrollTop=history.scrollHeight;
 }
 
