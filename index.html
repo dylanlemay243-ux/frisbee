@@ -16,6 +16,7 @@ if ("serviceWorker" in navigator) {
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js"></script>
 
 <style>
 
@@ -47,13 +48,8 @@ font-weight:bold;
 cursor:pointer;
 }
 
-.connect{
-background:#22c55e;
-}
-
-.download{
-background:#38bdf8;
-}
+.connect{background:#22c55e;}
+.download{background:#38bdf8;}
 
 .stats{
 display:flex;
@@ -82,11 +78,10 @@ margin-top:6px;
 }
 
 .liveRPM{
-font-size:72px;
+font-size:52px;
 font-weight:bold;
-margin-top:20px;
+margin-top:10px;
 color:#22c55e;
-text-shadow:0 0 20px #22c55e;
 }
 
 .throwCount{
@@ -137,6 +132,10 @@ color:#64748b;
 <button class="connect" onclick="connect()">Connect</button>
 <button class="download" onclick="downloadData()">Download Session</button>
 
+<br><br>
+
+<canvas id="rpmGauge" width="320" height="180"></canvas>
+
 <div class="liveRPM" id="live">-- RPM</div>
 <div class="throwCount" id="throwCount">0 Throws</div>
 
@@ -176,6 +175,36 @@ let throwHistory=[];
 let lastThrowNumber=0;
 
 let speedChart;
+let rpmGauge;
+
+function initGauge(){
+
+const opts = {
+angle:-0.2,
+lineWidth:0.2,
+radiusScale:1,
+pointer:{
+length:0.6,
+strokeWidth:0.035,
+color:'#22c55e'
+},
+colorStart:'#22c55e',
+colorStop:'#22c55e',
+strokeColor:'#1e293b',
+generateGradient:true,
+highDpiSupport:true
+};
+
+const target=document.getElementById('rpmGauge');
+
+rpmGauge=new Gauge(target).setOptions(opts);
+
+rpmGauge.maxValue=450;
+rpmGauge.setMinValue(0);
+rpmGauge.animationSpeed=32;
+rpmGauge.set(0);
+
+}
 
 function initChart(){
 
@@ -206,6 +235,7 @@ y:{beginAtZero:true,ticks:{color:"#94a3b8"}}
 
 }
 
+initGauge();
 initChart();
 
 async function connect(){
@@ -248,7 +278,10 @@ const parts=value.split("|");
 try{
 
 const liveRPM=parseFloat(parts[0].split(":")[1]);
+
 document.getElementById("live").innerText=liveRPM.toFixed(0)+" RPM";
+
+rpmGauge.set(liveRPM);
 
 const throwNum=parseInt(parts[1].split(":")[1]);
 
@@ -302,9 +335,7 @@ rpm:lastRPM
 }
 
 }catch(e){
-
 console.log("Bad packet:",value);
-
 }
 
 }
@@ -319,7 +350,6 @@ row.innerText=text;
 const history=document.getElementById("history");
 
 history.appendChild(row);
-
 history.scrollTop=history.scrollHeight;
 
 }
@@ -327,28 +357,22 @@ history.scrollTop=history.scrollHeight;
 function downloadData(){
 
 if(throwHistory.length===0){
-
 alert("No throws recorded.");
 return;
-
 }
 
 let csv="Throw,Speed MPH,RPM\n";
 
 throwHistory.forEach(t=>{
-
 csv+=`${t.throw},${t.speed.toFixed(1)},${t.rpm.toFixed(1)}\n`;
-
 });
 
 const blob=new Blob([csv],{type:"text/csv"});
 const url=URL.createObjectURL(blob);
 
 const a=document.createElement("a");
-
 a.href=url;
 a.download="frisbee_session.csv";
-
 a.click();
 
 URL.revokeObjectURL(url);
