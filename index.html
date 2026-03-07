@@ -1,4 +1,3 @@
-<!-- FULL FILE -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -6,6 +5,7 @@
 <meta charset="UTF-8">
 <title>Smart Frisbee Tracker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#22c55e">
 
 <link rel="manifest" href="/frisbee/manifest.json">
 
@@ -17,6 +17,7 @@ navigator.serviceWorker.register("/frisbee/service-worker.js");
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <style>
 
@@ -30,7 +31,7 @@ padding:20px;
 
 button{
 padding:12px 24px;
-margin:10px;
+margin:8px;
 font-size:16px;
 border-radius:8px;
 border:none;
@@ -39,16 +40,26 @@ color:black;
 font-weight:bold;
 }
 
-#disc{
-font-size:60px;
-transition:transform .1s linear;
+.stats{
+display:flex;
+justify-content:center;
+gap:20px;
+margin-top:20px;
+flex-wrap:wrap;
+}
+
+.card{
+background:#1e293b;
+padding:15px;
+border-radius:10px;
+width:160px;
 }
 
 .chartGrid{
 display:grid;
 grid-template-columns:1fr 1fr;
 gap:20px;
-margin-top:20px;
+margin-top:25px;
 }
 
 @media(max-width:700px){
@@ -57,8 +68,20 @@ grid-template-columns:1fr;
 }
 }
 
-</style>
+.historyBox{
+margin-top:30px;
+background:#1e293b;
+padding:15px;
+border-radius:10px;
+max-width:420px;
+margin-left:auto;
+margin-right:auto;
+height:220px;
+overflow-y:auto;
+text-align:left;
+}
 
+</style>
 </head>
 
 <body>
@@ -68,11 +91,32 @@ grid-template-columns:1fr;
 <button onclick="connect()">Connect</button>
 <button onclick="downloadData()">Download Session</button>
 
-<div id="disc">🥏</div>
+<br><br>
+
+<div id="viewer" style="width:100%;height:260px;"></div>
 
 <canvas id="rpmGauge" width="300" height="150"></canvas>
 
 <h2 id="live">-- RPM</h2>
+
+<div class="stats">
+
+<div class="card">
+<div>Last Throw</div>
+<div id="last">--</div>
+</div>
+
+<div class="card">
+<div>Average (5)</div>
+<div id="avg">--</div>
+</div>
+
+<div class="card">
+<div>Max Throw</div>
+<div id="max">--</div>
+</div>
+
+</div>
 
 <div class="chartGrid">
 
@@ -88,7 +132,9 @@ grid-template-columns:1fr;
 
 </div>
 
-<div id="history"></div>
+<div class="historyBox" id="history">
+<b>Throw History</b>
+</div>
 
 <script>
 
@@ -98,6 +144,41 @@ let throwHistory=[];
 let speedChart;
 let rpmChart;
 let rpmGauge;
+
+let disc;
+
+function init3D(){
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(60,window.innerWidth/260,0.1,1000);
+
+const renderer=new THREE.WebGLRenderer({alpha:true});
+renderer.setSize(window.innerWidth*0.9,260);
+
+document.getElementById("viewer").appendChild(renderer.domElement);
+
+const geometry=new THREE.CylinderGeometry(1,1,0.1,64);
+const material=new THREE.MeshStandardMaterial({color:0xffcc00});
+
+disc=new THREE.Mesh(geometry,material);
+scene.add(disc);
+
+disc.rotation.x=Math.PI/2;
+
+const light=new THREE.DirectionalLight(0xffffff,1);
+light.position.set(5,5,5);
+scene.add(light);
+
+camera.position.z=3;
+
+function animate(){
+requestAnimationFrame(animate);
+renderer.render(scene,camera);
+}
+
+animate();
+
+}
 
 function initGauge(){
 
@@ -131,6 +212,7 @@ data:{labels:[],datasets:[{label:"RPM",data:[],borderColor:"#38bdf8"}]}
 
 }
 
+init3D();
 initGauge();
 initCharts();
 
@@ -174,11 +256,11 @@ rpmGauge.set(rpm);
 
 const tilt=parts[1].split(":")[1].split(",");
 
-const roll=parseFloat(tilt[0]);
-const pitch=parseFloat(tilt[1]);
+const roll=parseFloat(tilt[0])*Math.PI/180;
+const pitch=parseFloat(tilt[1])*Math.PI/180;
 
-document.getElementById("disc").style.transform=
-`rotateX(${pitch}deg) rotateZ(${roll}deg)`;
+disc.rotation.z=roll;
+disc.rotation.x=Math.PI/2+pitch;
 
 const throwNum=parseInt(parts[2].split(":")[1]);
 
@@ -189,6 +271,17 @@ const lastParts=parts[3].split(":")[1].split(",");
 const speed=parseFloat(lastParts[0]);
 const spin=parseFloat(lastParts[1]);
 
+document.getElementById("last").innerText=
+speed.toFixed(1)+" mph / "+spin.toFixed(0)+" rpm";
+
+const avgParts=parts[4].split(":")[1].split(",");
+document.getElementById("avg").innerText=
+avgParts[0]+" mph / "+avgParts[1]+" rpm";
+
+const maxParts=parts[5].split(":")[1].split(",");
+document.getElementById("max").innerText=
+maxParts[0]+" mph / "+maxParts[1]+" rpm";
+
 speedChart.data.labels.push(throwNum);
 speedChart.data.datasets[0].data.push(speed);
 speedChart.update();
@@ -197,11 +290,33 @@ rpmChart.data.labels.push(throwNum);
 rpmChart.data.datasets[0].data.push(spin);
 rpmChart.update();
 
-}
+const row=document.createElement("div");
+row.innerText="Throw "+throwNum+" — "+speed.toFixed(1)+" mph / "+spin.toFixed(0)+" rpm";
+document.getElementById("history").appendChild(row);
+
+throwHistory.push({throw:throwNum,speed:speed,rpm:spin});
 
 }
 
-function downloadData(){}
+}
+
+function downloadData(){
+
+let csv="Throw,Speed MPH,RPM\n";
+
+throwHistory.forEach(t=>{
+csv+=`${t.throw},${t.speed},${t.rpm}\n`;
+});
+
+const blob=new Blob([csv],{type:"text/csv"});
+const url=URL.createObjectURL(blob);
+
+const a=document.createElement("a");
+a.href=url;
+a.download="frisbee_session.csv";
+a.click();
+
+}
 
 </script>
 
