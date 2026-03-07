@@ -315,107 +315,187 @@ let replayRenderer;
 
 function initReplay(){
 
-replayScene=new THREE.Scene();
+replayScene = new THREE.Scene();
 
-replayCamera=new THREE.PerspectiveCamera(
+replayCamera = new THREE.PerspectiveCamera(
 60,
 window.innerWidth/300,
 0.1,
 1000
 );
 
-replayRenderer=new THREE.WebGLRenderer({antialias:true});
-
+replayRenderer = new THREE.WebGLRenderer({antialias:true});
 replayRenderer.setSize(window.innerWidth*0.9,300);
 
 document.getElementById("replay")
 .appendChild(replayRenderer.domElement);
 
-const groundGeo=new THREE.PlaneGeometry(200,200);
 
-const groundMat=new THREE.MeshStandardMaterial({
+/* ground */
+
+const groundGeo = new THREE.PlaneGeometry(600,200);
+const groundMat = new THREE.MeshStandardMaterial({
 color:0x14532d
 });
 
-const ground=new THREE.Mesh(groundGeo,groundMat);
-
-ground.rotation.x=-Math.PI/2;
-
+const ground = new THREE.Mesh(groundGeo,groundMat);
+ground.rotation.x = -Math.PI/2;
 replayScene.add(ground);
 
-const discGeo=new THREE.CylinderGeometry(0.5,0.5,0.05,64);
-const discMat=new THREE.MeshStandardMaterial({
-color:0xfacc15
+
+/* distance lines */
+
+for(let i=50;i<=400;i+=50){
+
+const lineGeo = new THREE.BoxGeometry(0.3,0.01,200);
+const lineMat = new THREE.MeshBasicMaterial({color:0xffffff});
+
+const line = new THREE.Mesh(lineGeo,lineMat);
+
+line.position.x = i*0.3;
+
+replayScene.add(line);
+
+}
+
+
+/* disc */
+
+const discGeo = new THREE.CylinderGeometry(0.6,0.6,0.08,64);
+
+const discMat = new THREE.MeshStandardMaterial({
+color:0xfacc15,
+metalness:0.2,
+roughness:0.6
 });
 
-replayDisc=new THREE.Mesh(discGeo,discMat);
+replayDisc = new THREE.Mesh(discGeo,discMat);
 
-replayDisc.rotation.x=Math.PI/2;
+/* keep disc flat */
+
+replayDisc.rotation.x = Math.PI/2;
 
 replayScene.add(replayDisc);
 
-const light=new THREE.DirectionalLight(0xffffff,1);
 
-light.position.set(10,20,10);
+/* lighting */
 
+const light = new THREE.DirectionalLight(0xffffff,1);
+light.position.set(20,40,10);
 replayScene.add(light);
 
 replayScene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-replayCamera.position.set(0,5,10);
+
+/* camera */
+
+replayCamera.position.set(-10,6,10);
+replayCamera.lookAt(0,0,0);
 
 }
 
 /* SIMULATION */
 
-function simulateThrow(speedMPH,angleDeg){
+function simulateThrow(speedMPH,rpm){
 
-const speed=speedMPH*0.447;
+const speed = speedMPH * 0.447; // m/s
 
-const angle=angleDeg*Math.PI/180;
+let vx = speed;
+let vy = 1.5; // small lift
 
-let vx=speed*Math.cos(angle);
-let vy=speed*Math.sin(angle);
+let x = 0;
+let y = 1;
 
-let x=0;
-let y=1;
+const dt = 0.02;
 
-const g=9.81;
+/* physics tuning */
 
-const dt=0.02;
+let drag = 0.015;
+let gravity = 9.81;
 
-let path=[];
+/* spin adds glide */
 
-while(y>=0){
+let lift = rpm * 0.002;
 
-x+=vx*dt;
-y+=vy*dt;
+let path = [];
 
-vy-=g*dt;
+while(y >= 0){
+
+vx -= drag;
+vy -= (gravity - lift) * dt;
+
+x += vx * dt;
+y += vy * dt;
 
 path.push({x:x,y:y});
 
 }
 
-animateThrow(path);
+function animateThrow(path,rpm){
 
-document.getElementById("distance").innerText=
-"Distance: "+(x*3.28).toFixed(1)+" ft";
+let i = 0;
 
-}
+let trailPoints = [];
 
-function animateThrow(path){
-
-let i=0;
+const trailMat = new THREE.LineBasicMaterial({
+color:0xffffff
+});
 
 function step(){
 
-if(i>=path.length)return;
+if(i >= path.length){
 
-replayDisc.position.x=path[i].x;
-replayDisc.position.y=path[i].y;
+/* landing marker */
 
-replayDisc.rotation.z+=0.3;
+const markerGeo = new THREE.CylinderGeometry(0.4,0.4,0.05,32);
+const markerMat = new THREE.MeshBasicMaterial({color:0xff0000});
+
+const marker = new THREE.Mesh(markerGeo,markerMat);
+
+marker.position.set(
+path[path.length-1].x,
+0.02,
+0
+);
+
+replayScene.add(marker);
+
+return;
+}
+
+const p = path[i];
+
+/* disc position */
+
+replayDisc.position.x = p.x;
+replayDisc.position.y = p.y;
+
+/* correct frisbee spin */
+
+replayDisc.rotation.z += rpm * 0.0006;
+
+
+/* camera follow */
+
+replayCamera.position.x = p.x - 8;
+replayCamera.lookAt(p.x,1,0);
+
+
+/* flight trail */
+
+trailPoints.push(
+new THREE.Vector3(p.x,p.y,0)
+);
+
+const trailGeo = new THREE.BufferGeometry()
+.setFromPoints(trailPoints);
+
+const trail = new THREE.Line(trailGeo,trailMat);
+
+replayScene.add(trail);
+
+
+/* render */
 
 replayRenderer.render(replayScene,replayCamera);
 
@@ -535,32 +615,41 @@ speed:speed,
 rpm:spinRPM
 });
 
-simulateThrow(speed,angle);
+function simulateThrow(speedMPH,rpm){
+
+const speed = speedMPH * 0.447;
+
+let vx = speed;
+let vy = 1.5;
+
+let x = 0;
+let y = 1;
+
+const dt = 0.02;
+
+const drag = 0.02;
+const gravity = 9.81;
+
+const lift = rpm * 0.002;
+
+let path = [];
+
+while(y >= 0){
+
+vx -= drag;
+vy -= (gravity - lift) * dt;
+
+x += vx * dt;
+y += vy * dt;
+
+path.push({x:x,y:y});
 
 }
 
-}
+animateThrow(path,rpm);
 
-/* CSV DOWNLOAD */
-
-function downloadData(){
-
-let csv="Throw,Speed MPH,RPM\n";
-
-throwHistory.forEach(t=>{
-csv+=`${t.throw},${t.speed},${t.rpm}\n`;
-});
-
-const blob=new Blob([csv],{type:"text/csv"});
-
-const url=URL.createObjectURL(blob);
-
-const a=document.createElement("a");
-
-a.href=url;
-a.download="frisbee_session.csv";
-
-a.click();
+document.getElementById("distance").innerText =
+"Distance: "+(x*3.28).toFixed(0)+" ft";
 
 }
 
