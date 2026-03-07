@@ -1,3 +1,4 @@
+<!-- FULL FILE -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -5,13 +6,12 @@
 <meta charset="UTF-8">
 <title>Smart Frisbee Tracker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#22c55e">
 
 <link rel="manifest" href="/frisbee/manifest.json">
 
 <script>
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/frisbee/service-worker.js");
+navigator.serviceWorker.register("/frisbee/service-worker.js");
 }
 </script>
 
@@ -21,164 +21,79 @@ if ("serviceWorker" in navigator) {
 <style>
 
 body{
-font-family: Arial, sans-serif;
-text-align:center;
-background:linear-gradient(160deg,#020617,#0f172a);
+font-family:Arial;
+background:#020617;
 color:white;
+text-align:center;
 padding:20px;
 }
 
-h1{
-font-size:34px;
-margin-bottom:5px;
-}
-
-.subtitle{
-color:#94a3b8;
-margin-bottom:20px;
-}
-
 button{
-padding:14px 28px;
-margin:8px;
+padding:12px 24px;
+margin:10px;
 font-size:16px;
+border-radius:8px;
 border:none;
-border-radius:10px;
+background:#22c55e;
+color:black;
 font-weight:bold;
-cursor:pointer;
 }
 
-.connect{background:#22c55e;}
-.download{background:#38bdf8;}
-
-.stats{
-display:flex;
-flex-wrap:wrap;
-justify-content:center;
-gap:15px;
-margin-top:25px;
+#disc{
+font-size:60px;
+transition:transform .1s linear;
 }
 
-.card{
-background:#1e293b;
-padding:18px;
-border-radius:12px;
-width:200px;
-box-shadow:0 0 12px rgba(0,0,0,0.6);
-}
-
-.cardTitle{
-font-size:14px;
-color:#94a3b8;
-}
-
-.cardValue{
-font-size:20px;
-margin-top:6px;
-}
-
-.liveRPM{
-font-size:52px;
-font-weight:bold;
-margin-top:10px;
-color:#22c55e;
-}
-
-.throwCount{
-margin-top:10px;
-font-size:16px;
-color:#94a3b8;
-}
-
-.chartBox{
-margin-top:30px;
-max-width:700px;
-margin-left:auto;
-margin-right:auto;
-}
-
-.historyBox{
-margin-top:30px;
-background:#1e293b;
-padding:15px;
-border-radius:12px;
-max-width:450px;
-margin-left:auto;
-margin-right:auto;
-height:250px;
-overflow-y:auto;
-text-align:left;
-}
-
-.throwRow{
-border-bottom:1px solid #334155;
-padding:8px 0;
-}
-
-.debug{
+.chartGrid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:20px;
 margin-top:20px;
-font-size:12px;
-color:#64748b;
+}
+
+@media(max-width:700px){
+.chartGrid{
+grid-template-columns:1fr;
+}
 }
 
 </style>
+
 </head>
 
 <body>
 
 <h1>🥏 Smart Frisbee</h1>
-<div class="subtitle">Throw Tracker</div>
 
-<button class="connect" onclick="connect()">Connect</button>
-<button class="download" onclick="downloadData()">Download Session</button>
+<button onclick="connect()">Connect</button>
+<button onclick="downloadData()">Download Session</button>
 
-<br><br>
+<div id="disc">🥏</div>
 
-<canvas id="rpmGauge" width="320" height="180"></canvas>
+<canvas id="rpmGauge" width="300" height="150"></canvas>
 
-<div class="liveRPM" id="live">-- RPM</div>
-<div class="throwCount" id="throwCount">0 Throws</div>
+<h2 id="live">-- RPM</h2>
 
-<div class="stats">
+<div class="chartGrid">
 
-<div class="card">
-<div class="cardTitle">Last Throw</div>
-<div class="cardValue" id="last">--</div>
-</div>
-
-<div class="card">
-<div class="cardTitle">Average (5)</div>
-<div class="cardValue" id="avg">--</div>
-</div>
-
-<div class="card">
-<div class="cardTitle">Max Throw</div>
-<div class="cardValue" id="max">--</div>
-</div>
-
-</div>
-
-<div class="chartBox">
-
+<div>
 <h3>Throw Speed (MPH)</h3>
 <canvas id="speedChart"></canvas>
+</div>
 
-<h3 style="margin-top:40px;">Throw Spin (RPM)</h3>
+<div>
+<h3>Throw Spin (RPM)</h3>
 <canvas id="rpmChart"></canvas>
+</div>
 
 </div>
 
-<div class="historyBox" id="history">
-<b>Throw History</b>
-</div>
-
-<div class="debug" id="debug"></div>
+<div id="history"></div>
 
 <script>
 
 let characteristic;
 let throwHistory=[];
-let lastThrowNumber=0;
 
 let speedChart;
 let rpmChart;
@@ -186,96 +101,32 @@ let rpmGauge;
 
 function initGauge(){
 
-const opts = {
+const opts={
 angle:-0.2,
 lineWidth:0.2,
-radiusScale:1,
-pointer:{
-length:0.6,
-strokeWidth:0.035,
-color:'#22c55e'
-},
-colorStart:'#22c55e',
-colorStop:'#22c55e',
-strokeColor:'#1e293b',
-generateGradient:true,
-highDpiSupport:true
+pointer:{length:0.6,color:'#22c55e'},
+strokeColor:'#1e293b'
 };
 
 const target=document.getElementById('rpmGauge');
 
 rpmGauge=new Gauge(target).setOptions(opts);
-
 rpmGauge.maxValue=450;
 rpmGauge.setMinValue(0);
 rpmGauge.animationSpeed=32;
-rpmGauge.set(0);
 
 }
 
 function initCharts(){
 
-const speedCtx=document.getElementById('speedChart');
-const rpmCtx=document.getElementById('rpmChart');
-
-speedChart=new Chart(speedCtx,{
+speedChart=new Chart(document.getElementById("speedChart"),{
 type:'line',
-data:{
-labels:[],
-datasets:[{
-label:'Speed (MPH)',
-data:[],
-borderColor:'#22c55e',
-backgroundColor:'rgba(34,197,94,0.2)',
-tension:0.4,
-pointRadius:5
-}]
-},
-options:{
-responsive:true,
-plugins:{legend:{display:true}},
-scales:{
-x:{
-title:{display:true,text:"Throw Number"},
-ticks:{color:"#94a3b8"}
-},
-y:{
-title:{display:true,text:"MPH"},
-beginAtZero:true,
-ticks:{color:"#94a3b8"}
-}
-}
-}
+data:{labels:[],datasets:[{label:"MPH",data:[],borderColor:"#22c55e"}]}
 });
 
-rpmChart=new Chart(rpmCtx,{
+rpmChart=new Chart(document.getElementById("rpmChart"),{
 type:'line',
-data:{
-labels:[],
-datasets:[{
-label:'Spin (RPM)',
-data:[],
-borderColor:'#38bdf8',
-backgroundColor:'rgba(56,189,248,0.2)',
-tension:0.4,
-pointRadius:5
-}]
-},
-options:{
-responsive:true,
-plugins:{legend:{display:true}},
-scales:{
-x:{
-title:{display:true,text:"Throw Number"},
-ticks:{color:"#94a3b8"}
-},
-y:{
-title:{display:true,text:"RPM"},
-beginAtZero:true,
-ticks:{color:"#94a3b8"}
-}
-}
-}
+data:{labels:[],datasets:[{label:"RPM",data:[],borderColor:"#38bdf8"}]}
 });
 
 }
@@ -311,123 +162,46 @@ handleData
 
 function handleData(event){
 
-let value=new TextDecoder("utf-8")
-.decode(event.target.value).trim();
-
-document.getElementById("debug").innerText=value;
-
-if(!value.includes("LIVE:")) return;
+let value=new TextDecoder().decode(event.target.value).trim();
 
 const parts=value.split("|");
 
-try{
+const rpm=parseFloat(parts[0].split(":")[1]);
 
-const liveRPM=parseFloat(parts[0].split(":")[1]);
+document.getElementById("live").innerText=rpm+" RPM";
 
-document.getElementById("live").innerText=liveRPM.toFixed(0)+" RPM";
+rpmGauge.set(rpm);
 
-rpmGauge.set(liveRPM);
+const tilt=parts[1].split(":")[1].split(",");
 
-const throwNum=parseInt(parts[1].split(":")[1]);
+const roll=parseFloat(tilt[0]);
+const pitch=parseFloat(tilt[1]);
 
-const lastParts=parts[2].split(":")[1].split(",");
-const lastSpeed=parseFloat(lastParts[0]);
-const lastRPM=parseFloat(lastParts[1]);
+document.getElementById("disc").style.transform=
+`rotateX(${pitch}deg) rotateZ(${roll}deg)`;
+
+const throwNum=parseInt(parts[2].split(":")[1]);
 
 if(throwNum>0){
 
-lastThrowNumber=throwNum;
+const lastParts=parts[3].split(":")[1].split(",");
 
-document.getElementById("throwCount").innerText=
-throwNum+" Throws";
+const speed=parseFloat(lastParts[0]);
+const spin=parseFloat(lastParts[1]);
 
-document.getElementById("last").innerText=
-lastSpeed.toFixed(1)+" mph / "+
-lastRPM.toFixed(0)+" rpm";
-
-const avgParts=parts[3].split(":")[1].split(",");
-const avgSpeed=parseFloat(avgParts[0]);
-const avgRPM=parseFloat(avgParts[1]);
-
-document.getElementById("avg").innerText=
-avgSpeed.toFixed(1)+" mph / "+
-avgRPM.toFixed(0)+" rpm";
-
-const maxParts=parts[4].split(":")[1].split(",");
-const maxSpeed=parseFloat(maxParts[0]);
-const maxRPM=parseFloat(maxParts[1]);
-
-document.getElementById("max").innerText=
-maxSpeed.toFixed(1)+" mph / "+
-maxRPM.toFixed(0)+" rpm";
-
-addHistory(
-"Throw "+throwNum+
-" — "+lastSpeed.toFixed(1)+" mph / "+
-lastRPM.toFixed(0)+" rpm"
-);
-
-speedChart.data.labels.push("Throw "+throwNum);
-speedChart.data.datasets[0].data.push(lastSpeed);
+speedChart.data.labels.push(throwNum);
+speedChart.data.datasets[0].data.push(speed);
 speedChart.update();
 
-rpmChart.data.labels.push("Throw "+throwNum);
-rpmChart.data.datasets[0].data.push(lastRPM);
+rpmChart.data.labels.push(throwNum);
+rpmChart.data.datasets[0].data.push(spin);
 rpmChart.update();
 
-throwHistory.push({
-throw:throwNum,
-speed:lastSpeed,
-rpm:lastRPM
-});
-
-}
-
-}catch(e){
-console.log("Bad packet:",value);
 }
 
 }
 
-function addHistory(text){
-
-const row=document.createElement("div");
-
-row.className="throwRow";
-row.innerText=text;
-
-const history=document.getElementById("history");
-
-history.appendChild(row);
-
-history.scrollTop=history.scrollHeight;
-
-}
-
-function downloadData(){
-
-if(throwHistory.length===0){
-alert("No throws recorded.");
-return;
-}
-
-let csv="Throw,Speed MPH,RPM\n";
-
-throwHistory.forEach(t=>{
-csv+=`${t.throw},${t.speed.toFixed(1)},${t.rpm.toFixed(1)}\n`;
-});
-
-const blob=new Blob([csv],{type:"text/csv"});
-const url=URL.createObjectURL(blob);
-
-const a=document.createElement("a");
-a.href=url;
-a.download="frisbee_session.csv";
-a.click();
-
-URL.revokeObjectURL(url);
-
-}
+function downloadData(){}
 
 </script>
 
