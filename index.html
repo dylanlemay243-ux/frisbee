@@ -4,10 +4,16 @@
 
 <meta charset="UTF-8">
 <title>Smart Frisbee Tracker</title>
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#22c55e">
 
 <link rel="manifest" href="/frisbee/manifest.json">
+
+<script>
+if ("serviceWorker" in navigator) {
+navigator.serviceWorker.register("/frisbee/service-worker.js");
+}
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js"></script>
@@ -16,39 +22,93 @@
 <style>
 
 body{
-font-family:Arial;
-background:#020617;
-color:white;
+font-family:Arial, sans-serif;
 text-align:center;
+background:linear-gradient(160deg,#020617,#0f172a);
+color:white;
 padding:20px;
+}
+
+button{
+padding:14px 28px;
+margin:8px;
+font-size:16px;
+border:none;
+border-radius:10px;
+font-weight:bold;
+cursor:pointer;
+background:#22c55e;
+}
+
+.download{
+background:#38bdf8;
 }
 
 .stats{
 display:flex;
-gap:20px;
-justify-content:center;
-margin-top:20px;
 flex-wrap:wrap;
+justify-content:center;
+gap:15px;
+margin-top:25px;
 }
 
 .card{
 background:#1e293b;
-padding:15px;
-border-radius:10px;
-width:160px;
+padding:18px;
+border-radius:12px;
+width:170px;
+box-shadow:0 0 12px rgba(0,0,0,0.6);
+}
+
+.cardTitle{
+font-size:14px;
+color:#94a3b8;
+}
+
+.cardValue{
+font-size:20px;
+margin-top:6px;
+}
+
+.liveRPM{
+font-size:50px;
+font-weight:bold;
+margin-top:10px;
+color:#22c55e;
 }
 
 .chartGrid{
 display:grid;
 grid-template-columns:1fr 1fr;
 gap:20px;
-margin-top:20px;
+margin-top:30px;
+max-width:900px;
+margin-left:auto;
+margin-right:auto;
 }
 
 @media(max-width:700px){
 .chartGrid{
 grid-template-columns:1fr;
 }
+}
+
+.historyBox{
+margin-top:30px;
+background:#1e293b;
+padding:15px;
+border-radius:12px;
+max-width:450px;
+margin-left:auto;
+margin-right:auto;
+height:220px;
+overflow-y:auto;
+text-align:left;
+}
+
+.throwRow{
+border-bottom:1px solid #334155;
+padding:8px 0;
 }
 
 </style>
@@ -60,74 +120,122 @@ grid-template-columns:1fr;
 <h1>🥏 Smart Frisbee</h1>
 
 <button onclick="connect()">Connect</button>
+<button class="download" onclick="downloadData()">Download Session</button>
+
+<br><br>
 
 <div id="viewer" style="width:100%;height:260px;"></div>
 
-<h2 id="live">-- RPM</h2>
+<canvas id="rpmGauge" width="300" height="150"></canvas>
+
+<div class="liveRPM" id="live">-- RPM</div>
 
 <div class="stats">
 
 <div class="card">
-Last Throw
-<div id="last">--</div>
+<div class="cardTitle">Last Throw</div>
+<div class="cardValue" id="last">--</div>
 </div>
 
 <div class="card">
-Launch Angle
-<div id="angle">--</div>
+<div class="cardTitle">Launch Angle</div>
+<div class="cardValue" id="angle">--</div>
 </div>
 
 <div class="card">
-Average (5)
-<div id="avg">--</div>
+<div class="cardTitle">Average (5)</div>
+<div class="cardValue" id="avg">--</div>
 </div>
 
 <div class="card">
-Max
-<div id="max">--</div>
+<div class="cardTitle">Max Throw</div>
+<div class="cardValue" id="max">--</div>
 </div>
 
+</div>
+
+<div class="chartGrid">
+
+<div>
+<h3>Throw Speed (MPH)</h3>
+<canvas id="speedChart"></canvas>
+</div>
+
+<div>
+<h3>Throw Spin (RPM)</h3>
+<canvas id="rpmChart"></canvas>
+</div>
+
+</div>
+
+<div class="historyBox" id="history">
+<b>Throw History</b>
 </div>
 
 <script>
 
-let disc;
-let spin=0;
+let characteristic;
+let throwHistory=[];
 
-let smoothRoll=0;
-let smoothPitch=0;
+let speedChart;
+let rpmChart;
+let rpmGauge;
+
+let disc;
+let spin = 0;
+
+let smoothRoll = 0;
+let smoothPitch = 0;
+
+/* 3D DISC */
 
 function init3D(){
 
-const scene=new THREE.Scene();
+const scene = new THREE.Scene();
 
-const camera=new THREE.PerspectiveCamera(60,window.innerWidth/260,0.1,1000);
+const camera = new THREE.PerspectiveCamera(
+60,
+window.innerWidth/260,
+0.1,
+1000
+);
 
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+const renderer = new THREE.WebGLRenderer({
+antialias:true,
+alpha:true
+});
+
 renderer.setSize(window.innerWidth*0.9,260);
 
 document.getElementById("viewer").appendChild(renderer.domElement);
 
-const geometry=new THREE.CylinderGeometry(1,1,0.08,128);
-const material=new THREE.MeshStandardMaterial({color:0xff6a00});
+const geometry = new THREE.CylinderGeometry(1,1,0.08,128);
 
-disc=new THREE.Mesh(geometry,material);
+const material = new THREE.MeshStandardMaterial({
+color:0xffcc00,
+metalness:0.2,
+roughness:0.4
+});
+
+disc = new THREE.Mesh(geometry, material);
 scene.add(disc);
 
-const rimGeo=new THREE.TorusGeometry(1,0.07,32,128);
-const rimMat=new THREE.MeshStandardMaterial({color:0xff5500});
-const rim=new THREE.Mesh(rimGeo,rimMat);
-rim.rotation.x=Math.PI/2;
+const rimGeo = new THREE.TorusGeometry(1,0.07,32,128);
+const rimMat = new THREE.MeshStandardMaterial({color:0xffaa00});
+const rim = new THREE.Mesh(rimGeo,rimMat);
+
+rim.rotation.x = Math.PI/2;
+
 disc.add(rim);
 
-const light=new THREE.DirectionalLight(0xffffff,1);
-light.position.set(4,5,5);
-scene.add(light);
-
-const ambient=new THREE.AmbientLight(0xffffff,0.8);
+const ambient = new THREE.AmbientLight(0xffffff,0.9);
 scene.add(ambient);
 
-camera.position.set(0,1.5,3);
+const light = new THREE.DirectionalLight(0xffffff,1);
+light.position.set(5,5,5);
+scene.add(light);
+
+camera.position.set(0,1.8,3);
 camera.lookAt(0,0,0);
 
 function animate(){
@@ -137,8 +245,9 @@ requestAnimationFrame(animate);
 disc.rotation.x = smoothPitch;
 disc.rotation.z = smoothRoll;
 
-if(spin>20)
+if(spin > 20){
 disc.rotation.y += spin*0.002;
+}
 
 renderer.render(scene,camera);
 
@@ -148,7 +257,60 @@ animate();
 
 }
 
+/* RPM GAUGE */
+
+function initGauge(){
+
+const opts={
+angle:-0.2,
+lineWidth:0.2,
+pointer:{length:0.6,color:'#22c55e'},
+strokeColor:'#1e293b'
+};
+
+rpmGauge=new Gauge(document.getElementById("rpmGauge")).setOptions(opts);
+
+rpmGauge.maxValue=450;
+rpmGauge.setMinValue(0);
+rpmGauge.animationSpeed=32;
+
+}
+
+/* CHARTS */
+
+function initCharts(){
+
+speedChart=new Chart(document.getElementById("speedChart"),{
+type:'line',
+data:{
+labels:[],
+datasets:[{
+label:"Speed (MPH)",
+data:[],
+borderColor:"#22c55e"
+}]
+}
+});
+
+rpmChart=new Chart(document.getElementById("rpmChart"),{
+type:'line',
+data:{
+labels:[],
+datasets:[{
+label:"Spin (RPM)",
+data:[],
+borderColor:"#38bdf8"
+}]
+}
+});
+
+}
+
 init3D();
+initGauge();
+initCharts();
+
+/* BLE CONNECTION */
 
 async function connect(){
 
@@ -163,7 +325,7 @@ const service=await server.getPrimaryService(
 '4fafc201-1fb5-459e-8fcc-c5c9c331914b'
 );
 
-const characteristic=await service.getCharacteristic(
+characteristic=await service.getCharacteristic(
 'beb5483e-36e1-4688-b7f5-ea07361b26a8'
 );
 
@@ -176,6 +338,8 @@ handleData
 
 }
 
+/* DATA HANDLING */
+
 function handleData(event){
 
 let value=new TextDecoder().decode(event.target.value).trim();
@@ -186,6 +350,8 @@ const rpm=parseFloat(parts[0].split(":")[1]);
 
 document.getElementById("live").innerText=rpm.toFixed(0)+" RPM";
 
+rpmGauge.set(rpm);
+
 spin=rpm;
 
 const tilt=parts[1].split(":")[1].split(",");
@@ -193,8 +359,8 @@ const tilt=parts[1].split(":")[1].split(",");
 const roll=parseFloat(tilt[0])*Math.PI/180;
 const pitch=parseFloat(tilt[1])*Math.PI/180;
 
-smoothRoll += (roll-smoothRoll)*0.15;
-smoothPitch += (pitch-smoothPitch)*0.15;
+smoothRoll += (roll - smoothRoll)*0.15;
+smoothPitch += (pitch - smoothPitch)*0.15;
 
 const throwNum=parseInt(parts[2].split(":")[1]);
 
@@ -202,19 +368,73 @@ if(throwNum>0){
 
 const lastParts=parts[3].split(":")[1].split(",");
 
+const speed=parseFloat(lastParts[0]);
+const spinRPM=parseFloat(lastParts[1]);
+
 document.getElementById("last").innerText=
-lastParts[0]+" mph / "+lastParts[1]+" rpm";
+speed.toFixed(1)+" mph / "+spinRPM.toFixed(0)+" rpm";
 
 document.getElementById("angle").innerText=
 parts[4].split(":")[1]+"°";
 
+const avgParts=parts[5].split(":")[1].split(",");
+
 document.getElementById("avg").innerText=
-parts[5].split(":")[1];
+avgParts[0]+" mph / "+avgParts[1]+" rpm";
+
+const maxParts=parts[6].split(":")[1].split(",");
 
 document.getElementById("max").innerText=
-parts[6].split(":")[1];
+maxParts[0]+" mph / "+maxParts[1]+" rpm";
+
+speedChart.data.labels.push("Throw "+throwNum);
+speedChart.data.datasets[0].data.push(speed);
+speedChart.update();
+
+rpmChart.data.labels.push("Throw "+throwNum);
+rpmChart.data.datasets[0].data.push(spinRPM);
+rpmChart.update();
+
+const row=document.createElement("div");
+
+row.className="throwRow";
+
+row.innerText="Throw "+throwNum+
+" — "+speed.toFixed(1)+" mph / "+
+spinRPM.toFixed(0)+" rpm";
+
+document.getElementById("history").appendChild(row);
+
+throwHistory.push({
+throw:throwNum,
+speed:speed,
+rpm:spinRPM
+});
 
 }
+
+}
+
+/* CSV DOWNLOAD */
+
+function downloadData(){
+
+let csv="Throw,Speed MPH,RPM\n";
+
+throwHistory.forEach(t=>{
+csv+=`${t.throw},${t.speed},${t.rpm}\n`;
+});
+
+const blob=new Blob([csv],{type:"text/csv"});
+
+const url=URL.createObjectURL(blob);
+
+const a=document.createElement("a");
+
+a.href=url;
+a.download="frisbee_session.csv";
+
+a.click();
 
 }
 
