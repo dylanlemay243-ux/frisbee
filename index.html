@@ -4,6 +4,7 @@
 
 <meta charset="UTF-8">
 <title>Smart Frisbee Tracker</title>
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#22c55e">
 
@@ -22,7 +23,7 @@ navigator.serviceWorker.register("/frisbee/service-worker.js");
 <style>
 
 body{
-font-family:Arial, sans-serif;
+font-family:Arial;
 text-align:center;
 background:linear-gradient(160deg,#020617,#0f172a);
 color:white;
@@ -44,6 +45,12 @@ background:#22c55e;
 background:#38bdf8;
 }
 
+.liveRPM{
+font-size:56px;
+margin-top:10px;
+color:#22c55e;
+}
+
 .stats{
 display:flex;
 flex-wrap:wrap;
@@ -57,7 +64,6 @@ background:#1e293b;
 padding:18px;
 border-radius:12px;
 width:170px;
-box-shadow:0 0 12px rgba(0,0,0,0.6);
 }
 
 .cardTitle{
@@ -68,13 +74,6 @@ color:#94a3b8;
 .cardValue{
 font-size:20px;
 margin-top:6px;
-}
-
-.liveRPM{
-font-size:50px;
-font-weight:bold;
-margin-top:10px;
-color:#22c55e;
 }
 
 .chartGrid{
@@ -168,6 +167,14 @@ padding:8px 0;
 
 </div>
 
+<h2>Throw Replay</h2>
+
+<div id="replay" style="width:100%;height:300px;"></div>
+
+<div id="distance" style="font-size:20px;margin-top:10px;">
+Distance: --
+</div>
+
 <div class="historyBox" id="history">
 <b>Throw History</b>
 </div>
@@ -182,110 +189,78 @@ let rpmChart;
 let rpmGauge;
 
 let disc;
-let spin = 0;
+let spin=0;
 
-let smoothRoll = 0;
-let smoothPitch = 0;
+let smoothRoll=0;
+let smoothPitch=0;
 
-/* 3D DISC */
+/* ORIENTATION VIEW */
 
 function init3D(){
 
-const scene = new THREE.Scene();
+const scene=new THREE.Scene();
 
-const camera = new THREE.PerspectiveCamera(
+const camera=new THREE.PerspectiveCamera(
 70,
 window.innerWidth/260,
 0.1,
 1000
 );
 
-const renderer = new THREE.WebGLRenderer({
+const renderer=new THREE.WebGLRenderer({
 antialias:true,
 alpha:true
 });
 
 renderer.setSize(window.innerWidth*0.9,260);
-renderer.setPixelRatio(window.devicePixelRatio);
 
 document.getElementById("viewer").appendChild(renderer.domElement);
 
+const geo=new THREE.CylinderGeometry(1,1,0.08,128);
 
-/* DISC BODY */
-
-const discGeometry = new THREE.CylinderGeometry(1,1,0.08,128);
-
-const discMaterial = new THREE.MeshStandardMaterial({
+const mat=new THREE.MeshStandardMaterial({
 color:0xfacc15,
 metalness:0.1,
 roughness:0.6
 });
 
-disc = new THREE.Mesh(discGeometry,discMaterial);
+disc=new THREE.Mesh(geo,mat);
 scene.add(disc);
 
+const rimGeo=new THREE.TorusGeometry(1,0.07,32,128);
+const rimMat=new THREE.MeshStandardMaterial({color:0xf59e0b});
+const rim=new THREE.Mesh(rimGeo,rimMat);
 
-/* DISC RIM */
-
-const rimGeo = new THREE.TorusGeometry(1,0.07,32,128);
-
-const rimMat = new THREE.MeshStandardMaterial({
-color:0xf59e0b
-});
-
-const rim = new THREE.Mesh(rimGeo,rimMat);
-
-rim.rotation.x = Math.PI/2;
+rim.rotation.x=Math.PI/2;
 
 disc.add(rim);
 
+const markerGeo=new THREE.BoxGeometry(0.15,0.05,0.6);
+const markerMat=new THREE.MeshStandardMaterial({color:0x1e293b});
+const marker=new THREE.Mesh(markerGeo,markerMat);
 
-/* ORIENTATION MARKER (so tilt is visible) */
-
-const markerGeo = new THREE.BoxGeometry(0.15,0.05,0.6);
-
-const markerMat = new THREE.MeshStandardMaterial({
-color:0x1e293b
-});
-
-const marker = new THREE.Mesh(markerGeo,markerMat);
-
-marker.position.z = 0.7;
+marker.position.z=0.7;
 
 disc.add(marker);
 
+scene.add(new THREE.AmbientLight(0xffffff,0.9));
 
-/* LIGHTING */
-
-const ambient = new THREE.AmbientLight(0xffffff,0.9);
-scene.add(ambient);
-
-const light = new THREE.DirectionalLight(0xffffff,1);
+const light=new THREE.DirectionalLight(0xffffff,1);
 light.position.set(5,6,5);
 scene.add(light);
 
-
-/* CAMERA */
-
 camera.position.set(0,2.5,3.5);
 camera.lookAt(0,0,0);
-
-
-/* RENDER LOOP */
 
 function animate(){
 
 requestAnimationFrame(animate);
 
-/* apply tilt */
+disc.rotation.x=smoothPitch*1.6;
+disc.rotation.z=smoothRoll*1.6;
 
-disc.rotation.x = smoothPitch * 1.6;
-disc.rotation.z = smoothRoll * 1.6;
-
-/* spin animation */
-
-if(spin > 20){
-disc.rotation.y += spin * 0.003;
+if(spin>20){
+disc.rotation.y+=spin*0.003;
 }
 
 renderer.render(scene,camera);
@@ -321,35 +296,145 @@ function initCharts(){
 
 speedChart=new Chart(document.getElementById("speedChart"),{
 type:'line',
-data:{
-labels:[],
-datasets:[{
-label:"Speed (MPH)",
-data:[],
-borderColor:"#22c55e"
-}]
-}
+data:{labels:[],datasets:[{label:"MPH",data:[],borderColor:"#22c55e"}]}
 });
 
 rpmChart=new Chart(document.getElementById("rpmChart"),{
 type:'line',
-data:{
-labels:[],
-datasets:[{
-label:"Spin (RPM)",
-data:[],
-borderColor:"#38bdf8"
-}]
-}
+data:{labels:[],datasets:[{label:"RPM",data:[],borderColor:"#38bdf8"}]}
 });
+
+}
+
+/* THROW REPLAY */
+
+let replayScene;
+let replayDisc;
+let replayCamera;
+let replayRenderer;
+
+function initReplay(){
+
+replayScene=new THREE.Scene();
+
+replayCamera=new THREE.PerspectiveCamera(
+60,
+window.innerWidth/300,
+0.1,
+1000
+);
+
+replayRenderer=new THREE.WebGLRenderer({antialias:true});
+
+replayRenderer.setSize(window.innerWidth*0.9,300);
+
+document.getElementById("replay")
+.appendChild(replayRenderer.domElement);
+
+const groundGeo=new THREE.PlaneGeometry(200,200);
+
+const groundMat=new THREE.MeshStandardMaterial({
+color:0x14532d
+});
+
+const ground=new THREE.Mesh(groundGeo,groundMat);
+
+ground.rotation.x=-Math.PI/2;
+
+replayScene.add(ground);
+
+const discGeo=new THREE.CylinderGeometry(0.5,0.5,0.05,64);
+const discMat=new THREE.MeshStandardMaterial({
+color:0xfacc15
+});
+
+replayDisc=new THREE.Mesh(discGeo,discMat);
+
+replayDisc.rotation.x=Math.PI/2;
+
+replayScene.add(replayDisc);
+
+const light=new THREE.DirectionalLight(0xffffff,1);
+
+light.position.set(10,20,10);
+
+replayScene.add(light);
+
+replayScene.add(new THREE.AmbientLight(0xffffff,0.6));
+
+replayCamera.position.set(0,5,10);
+
+}
+
+/* SIMULATION */
+
+function simulateThrow(speedMPH,angleDeg){
+
+const speed=speedMPH*0.447;
+
+const angle=angleDeg*Math.PI/180;
+
+let vx=speed*Math.cos(angle);
+let vy=speed*Math.sin(angle);
+
+let x=0;
+let y=1;
+
+const g=9.81;
+
+const dt=0.02;
+
+let path=[];
+
+while(y>=0){
+
+x+=vx*dt;
+y+=vy*dt;
+
+vy-=g*dt;
+
+path.push({x:x,y:y});
+
+}
+
+animateThrow(path);
+
+document.getElementById("distance").innerText=
+"Distance: "+(x*3.28).toFixed(1)+" ft";
+
+}
+
+function animateThrow(path){
+
+let i=0;
+
+function step(){
+
+if(i>=path.length)return;
+
+replayDisc.position.x=path[i].x;
+replayDisc.position.y=path[i].y;
+
+replayDisc.rotation.z+=0.3;
+
+replayRenderer.render(replayScene,replayCamera);
+
+i++;
+
+requestAnimationFrame(step);
+
+}
+
+step();
 
 }
 
 init3D();
 initGauge();
 initCharts();
+initReplay();
 
-/* BLE CONNECTION */
+/* BLE */
 
 async function connect(){
 
@@ -377,8 +462,6 @@ handleData
 
 }
 
-/* DATA HANDLING */
-
 function handleData(event){
 
 let value=new TextDecoder().decode(event.target.value).trim();
@@ -398,8 +481,8 @@ const tilt=parts[1].split(":")[1].split(",");
 const roll=parseFloat(tilt[0])*Math.PI/180;
 const pitch=parseFloat(tilt[1])*Math.PI/180;
 
-smoothRoll += (roll - smoothRoll)*0.15;
-smoothPitch += (pitch - smoothPitch)*0.15;
+smoothRoll+=(roll-smoothRoll)*0.35;
+smoothPitch+=(pitch-smoothPitch)*0.35;
 
 const throwNum=parseInt(parts[2].split(":")[1]);
 
@@ -413,8 +496,10 @@ const spinRPM=parseFloat(lastParts[1]);
 document.getElementById("last").innerText=
 speed.toFixed(1)+" mph / "+spinRPM.toFixed(0)+" rpm";
 
+const angle=parseFloat(parts[4].split(":")[1]);
+
 document.getElementById("angle").innerText=
-parts[4].split(":")[1]+"°";
+angle.toFixed(1)+"°";
 
 const avgParts=parts[5].split(":")[1].split(",");
 
@@ -449,6 +534,8 @@ throw:throwNum,
 speed:speed,
 rpm:spinRPM
 });
+
+simulateThrow(speed,angle);
 
 }
 
