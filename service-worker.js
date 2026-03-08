@@ -1,4 +1,4 @@
-const CACHE_NAME = "smart-frisbee-v17";
+const CACHE_NAME = "smart-frisbee-v18";
 
 self.addEventListener("install", event => {
   console.log("Service Worker installing...");
@@ -13,6 +13,7 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   event.respondWith(fetch(event.request));
 });
+
 
 
 
