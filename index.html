@@ -487,6 +487,7 @@ let throwHistory = [];
 let lastThrowData = null;
 let bestDistance = 0;
 let speedChart, rpmChart;
+let lastSeenThrow = 0; // prevents double-logging the same throw number
 
 // 3D orientation viewer
 let discMesh, spinAngle = 0;
@@ -707,64 +708,108 @@ function initReplay() {
 }
 
 function buildField() {
-  // Ground
-  const groundGeo = new THREE.PlaneGeometry(300, 60);
+  // Ground — long enough for a 400ft throw (~120m)
+  const groundGeo = new THREE.PlaneGeometry(400, 60);
   const groundMat = new THREE.MeshStandardMaterial({ color: 0x14532d });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
+  ground.position.x = 150; // centre the field ahead of throw origin
   replayScene.add(ground);
 
-  // Yard lines every 10 meters
-  for (let x = 0; x <= 100; x += 10) {
-    const lineGeo = new THREE.BoxGeometry(0.15, 0.02, 50);
-    const lineMat = new THREE.MeshStandardMaterial({ color: 0x166534 });
+  // Distance markers every 10 metres with labels approximated as thin posts
+  for (let x = 0; x <= 120; x += 10) {
+    // Line across field
+    const lineGeo = new THREE.BoxGeometry(0.12, 0.02, 40);
+    const lineMat = new THREE.MeshStandardMaterial({
+      color: x % 50 === 0 ? 0x22c55e : 0x166534  // brighter every 50m
+    });
     const line = new THREE.Mesh(lineGeo, lineMat);
     line.position.set(x, 0.01, 0);
     replayScene.add(line);
-  }
 
-  // Sky gradient via background
-  replayRenderer && (replayRenderer.setClearColor(0x0a1628));
+    // Small marker post at each 10m line
+    const postGeo = new THREE.BoxGeometry(0.15, 0.6, 0.15);
+    const postMat = new THREE.MeshStandardMaterial({
+      color: x % 50 === 0 ? 0x22c55e : 0x4ade80
+    });
+    const post = new THREE.Mesh(postGeo, postMat);
+    post.position.set(x, 0.3, 18);
+    replayScene.add(post);
+  }
 }
 
 
 /* ═══════════════════════════════════════════
    PHYSICS SIMULATION
-   Uses proper ballistic arc with:
-   - configurable launch angle from sensor data
-   - drag proportional to v²
-   - lift from disc spin (Magnus effect approx)
-   - gravity
+   Speed is derived entirely from RPM — no
+   accel integration. RPM maps linearly to
+   launch speed (calibrated for 175g disc).
+
+   Flight model:
+   - Launch speed from RPM × SPEED_CONSTANT
+   - Launch angle from gyro pitch sensor
+   - Aerodynamic drag (v²) + disc lift (spin)
+   - Lift scales with RPM so fast throws fly far
+   - Angle shapes the arc (flat = more distance,
+     steep = higher but shorter)
+
+   Real-world calibration:
+   - 200 RPM ≈ 13 mph  → ~60 ft
+   - 350 RPM ≈ 23 mph  → ~150 ft
+   - 500 RPM ≈ 32 mph  → ~250 ft
+   - 650 RPM ≈ 42 mph  → ~330 ft  (elite)
 ═══════════════════════════════════════════ */
+
+const SPEED_CONSTANT = 0.065; // mph per RPM — tune vs radar gun
+
 function simulateThrow(speedMPH, rpm, launchAngleDeg) {
   lastThrowData = { speed: speedMPH, rpm, angle: launchAngleDeg || 10 };
 
-  const v0 = speedMPH * 0.44704; // m/s
-  const angleDeg = Math.max(2, Math.min(launchAngleDeg || 10, 35));
+  // ── Derive launch speed from RPM ──────────────
+  // Ignore the accel-based speedMPH entirely.
+  // RPM is our ground truth.
+  const derivedMPH = rpm * SPEED_CONSTANT;
+  const v0 = derivedMPH * 0.44704; // convert to m/s
+
+  // ── Launch angle ──────────────────────────────
+  // Clamp to realistic throwing range.
+  // Negative angle = disc thrown downward (skip it up to flat)
+  const angleDeg = Math.max(-5, Math.min(launchAngleDeg || 8, 40));
   const angleRad = angleDeg * Math.PI / 180;
 
+  // ── Disc physics constants (175g WFDF disc) ───
+  const mass = 0.175;   // kg
+  const area = 0.0616;  // m²  (π × 0.14²)
+  const rho  = 1.225;   // kg/m³ air density at sea level
+  const Cd   = 0.08;    // drag coefficient (disc is slippery edge-on)
+  // Lift coefficient scales with spin — fast spinning disc generates
+  // more lift. CL peaks around 0.33 for a well-thrown disc.
+  const ClMax = 0.33;
+  const Cl = ClMax * Math.min(rpm / 500, 1.0);
+
+  // ── Initial conditions ────────────────────────
   let vx = v0 * Math.cos(angleRad);
   let vy = v0 * Math.sin(angleRad);
-  const mass = 0.175; // kg, standard disc
-  const area = 0.0616; // m²
-  const Cd = 0.10;     // disc drag coefficient
-  const Cl = 0.18;     // disc lift coefficient
-  const rho = 1.225;   // air density kg/m³
+  let x  = 0;
+  let y  = 1.1;  // ~waist height release point (metres)
 
-  let x = 0, y = 1.2; // start at ~waist height
-  const dt = 0.025;
+  const dt   = 0.02;
   const path = [];
-  let t = 0;
+  let   t    = 0;
 
-  const spinFactor = Math.min(rpm / 400, 1.0); // normalise spin contribution
+  // ── Integration loop ──────────────────────────
+  while (y >= 0 && x < 300 && t < 12) {
+    const v    = Math.sqrt(vx * vx + vy * vy);
+    if (v < 0.01) break; // disc stopped
 
-  while (y >= 0 && x < 200 && t < 10) {
-    const v = Math.sqrt(vx * vx + vy * vy);
-    const drag = 0.5 * rho * Cd * area * v * v / mass;
-    const lift = 0.5 * rho * Cl * area * v * v * spinFactor / mass;
+    // Forces per unit mass (acceleration)
+    const dragMag = 0.5 * rho * Cd * area * v * v / mass;
+    const liftMag = 0.5 * rho * Cl * area * v * v / mass;
 
-    const ax = -drag * (vx / v);
-    const ay = lift - 9.81 - drag * (vy / v);
+    // Drag opposes velocity direction
+    const ax = -(dragMag * vx / v);
+    // Lift is upward, gravity is down, drag has vertical component
+    const ay = liftMag - 9.81 - (dragMag * vy / v);
 
     vx += ax * dt;
     vy += ay * dt;
@@ -773,76 +818,95 @@ function simulateThrow(speedMPH, rpm, launchAngleDeg) {
     t  += dt;
 
     path.push({ x, y, vx, vy, t });
-
     if (y < 0) break;
   }
 
-  const distanceFt = (x * 3.28084).toFixed(0);
+  // ── Update UI ─────────────────────────────────
+  const distanceFt = Math.round(x * 3.28084);
   document.getElementById('distance').textContent = distanceFt + ' ft';
 
-  if (parseFloat(distanceFt) > bestDistance) {
-    bestDistance = parseFloat(distanceFt);
+  if (distanceFt > bestDistance) {
+    bestDistance = distanceFt;
     document.getElementById('bestDist').textContent = bestDistance + ' ft';
   }
 
   document.getElementById('replayHud').textContent =
-    `SPEED: ${speedMPH.toFixed(1)} MPH  |  SPIN: ${rpm.toFixed(0)} RPM  |  ANGLE: ${angleDeg.toFixed(1)}°`;
+    `RPM: ${rpm.toFixed(0)}  |  EST SPEED: ${derivedMPH.toFixed(1)} MPH  |  ANGLE: ${angleDeg.toFixed(1)}°  |  DIST: ${distanceFt} ft`;
 
   animateThrow(path, rpm);
-
   document.getElementById('replayBtn').disabled = false;
 }
 
 
 /* ═══════════════════════════════════════════
    THROW ANIMATION
+   Camera pulls back dynamically based on
+   how far the disc travels so you always
+   see the full arc regardless of distance.
 ═══════════════════════════════════════════ */
 function animateThrow(path, rpm) {
   if (replayAF) cancelAnimationFrame(replayAF);
   replayPath = path;
 
-  let i = 0;
-  const totalFrames = path.length;
-  const spinRate = (rpm / 60) * Math.PI * 2 * 0.025; // rad per sim step
+  if (!path.length) return;
 
-  // Reset disc position
-  replayDisc.position.set(0, 1.2, 0);
+  const totalFrames = path.length;
+  const maxX = path[path.length - 1].x;  // total distance in metres
+
+  // Camera Z distance scales with throw distance so full arc is always visible
+  const camZ = Math.max(14, maxX * 0.55);
+  const camY = Math.max(5,  maxX * 0.18);
+
+  let i = 0;
+  const spinRate = (rpm / 60) * Math.PI * 2 * 0.02; // rad per sim step
+  let localSpin = 0;
+
+  // Reset disc
+  replayDisc.position.set(0, 1.1, 0);
   replayDisc.rotation.set(0, 0, 0);
 
-  // Camera start: behind and slightly above
-  replayCamera.position.set(-5, 4, 14);
-  replayCamera.lookAt(10, 2, 0);
-
-  let localSpin = 0;
+  // Camera: start from side-behind view
+  replayCamera.position.set(maxX * 0.1, camY, camZ);
+  replayCamera.lookAt(maxX * 0.4, camY * 0.4, 0);
 
   function step() {
     if (i >= totalFrames) {
       replayPath = [];
+      // Hold final position for a moment then reset camera
+      setTimeout(() => {
+        replayCamera.position.set(maxX * 0.1, camY, camZ);
+        replayCamera.lookAt(maxX * 0.5, 1, 0);
+        replayRenderer.render(replayScene, replayCamera);
+      }, 800);
       return;
     }
 
-    const p = path[i];
+    const p        = path[i];
     const progress = i / totalFrames;
 
-    // Position
+    // Disc position
     replayDisc.position.x = p.x;
-    replayDisc.position.y = Math.max(p.y, 0);
+    replayDisc.position.y = Math.max(p.y, 0.05);
     replayDisc.position.z = 0;
 
-    // Tilt disc based on flight angle (vy/vx)
-    const flightAngle = Math.atan2(p.vy, p.vx);
-    replayDisc.rotation.z = flightAngle * 0.6; // bank into trajectory
+    // Tilt nose along flight angle
+    const flightAngle = Math.atan2(p.vy, Math.max(p.vx, 0.1));
+    replayDisc.rotation.z = flightAngle * 0.5;
 
-    // Spin (Y axis = disc face spin)
+    // Spin around disc face axis
     localSpin += spinRate;
     replayDisc.rotation.y = localSpin;
 
-    // Camera: start behind, then follow alongside and zoom out
-    const camX = p.x - 8 - progress * 4;
-    const camY = 3 + Math.sin(progress * Math.PI) * 2;
-    replayCamera.position.x += (camX - replayCamera.position.x) * 0.06;
-    replayCamera.position.y += (camY - replayCamera.position.y) * 0.04;
-    replayCamera.lookAt(p.x + 5, p.y + 0.5, 0);
+    // Camera smoothly tracks slightly ahead of the disc
+    // and stays wide enough to see the whole trajectory
+    const targetCamX = p.x - maxX * 0.05;
+    const targetCamY = camY * (0.7 + 0.3 * Math.sin(progress * Math.PI));
+    replayCamera.position.x += (targetCamX - replayCamera.position.x) * 0.03;
+    replayCamera.position.y += (targetCamY - replayCamera.position.y) * 0.02;
+    replayCamera.position.z  = camZ; // keep consistent depth
+
+    // Look slightly ahead of disc
+    replayCamera.lookAt(p.x + maxX * 0.15, Math.max(p.y * 0.5, 1), 0);
 
     replayRenderer.render(replayScene, replayCamera);
     i++;
@@ -893,66 +957,99 @@ async function connect() {
    Packet format:
    LIVE:{rpm}|TILT:{roll},{pitch}|THROW:{n}|LAST:{mph},{rpm}|ANGLE:{deg}|AVG5:{mph},{rpm}|MAX:{mph},{rpm}
 ═══════════════════════════════════════════ */
+function parseField(parts, index, subIndex) {
+  try {
+    const afterColon = parts[index].split(':').slice(1).join(':'); // handles values with colons
+    if (subIndex !== undefined) return parseFloat(afterColon.split(',')[subIndex]) || 0;
+    return afterColon;
+  } catch(e) { return 0; }
+}
+
 function handleData(event) {
   const raw = new TextDecoder().decode(event.target.value).trim();
+  console.log('[BLE RX]', raw); // ← watch this in DevTools to confirm packets arrive
+
   const parts = raw.split('|');
-  if (parts.length < 7) return;
+  if (parts.length < 7) {
+    console.warn('[BLE] Short packet, only', parts.length, 'parts:', raw);
+    return;
+  }
 
-  // LIVE RPM
-  const rpm = parseFloat(parts[0].split(':')[1]) || 0;
-  liveRPM = rpm;
-  document.getElementById('liveRPM').textContent = rpm.toFixed(0).padStart(3, '0');
-  document.getElementById('rpmBar').style.width = Math.min((rpm / 450) * 100, 100) + '%';
+  // ── LIVE RPM (from LIVE: field) ──
+  const rpm = parseFloat(parts[0].replace('LIVE:', '')) || 0;
 
-  // TILT
-  const tiltParts = parts[1].split(':')[1].split(',');
+  // ── TILT ──
+  const tiltStr = parts[1].replace('TILT:', '');
+  const tiltParts = tiltStr.split(',');
   const rollDeg  = parseFloat(tiltParts[0]) || 0;
   const pitchDeg = parseFloat(tiltParts[1]) || 0;
-  targetRoll  = rollDeg  * Math.PI / 180;
-  targetPitch = pitchDeg * Math.PI / 180;
-  document.getElementById('rollVal').textContent  = rollDeg.toFixed(1) + '°';
-  document.getElementById('pitchVal').textContent = pitchDeg.toFixed(1) + '°';
 
-  // THROW DATA
-  const throwNum = parseInt(parts[2].split(':')[1]) || 0;
-  if (throwNum > 0) {
-    const lastParts = parts[3].split(':')[1].split(',');
-    const speed    = parseFloat(lastParts[0]) || 0;
-    const spinRPM  = parseFloat(lastParts[1]) || 0;
-    const angle    = parseFloat(parts[4].split(':')[1]) || 10;
-    const avgParts = parts[5].split(':')[1].split(',');
-    const maxParts = parts[6].split(':')[1].split(',');
+  // ── THROW NUMBER ──
+  const throwNum = parseInt(parts[2].replace('THROW:', '')) || 0;
 
-    document.getElementById('last').textContent   = speed.toFixed(1) + ' mph';
-    document.getElementById('angle').textContent  = angle.toFixed(1) + '°';
-    document.getElementById('avg').textContent    = parseFloat(avgParts[0]).toFixed(1) + ' mph';
-    document.getElementById('max').textContent    = parseFloat(maxParts[0]).toFixed(1) + ' mph';
-    document.getElementById('throwCount').textContent = throwNum;
-
-    // Charts
-    const label = '#' + throwNum;
-    speedChart.data.labels.push(label);
-    speedChart.data.datasets[0].data.push(speed);
-    speedChart.update();
-    rpmChart.data.labels.push(label);
-    rpmChart.data.datasets[0].data.push(spinRPM);
-    rpmChart.update();
-
-    // History row
-    document.getElementById('emptyState')?.remove();
-    const row = document.createElement('div');
-    row.className = 'throw-row';
-    row.innerHTML = `
-      <span class="throw-num">THROW ${throwNum}</span>
-      <span class="throw-speed">${speed.toFixed(1)} mph</span>
-      <span class="throw-rpm">${spinRPM.toFixed(0)} rpm</span>
-      <span style="color:var(--muted);font-size:12px">${angle.toFixed(1)}°</span>
-    `;
-    document.getElementById('history').appendChild(row);
-    throwHistory.push({ throw: throwNum, speed, rpm: spinRPM, angle });
-
-    simulateThrow(speed, spinRPM, angle);
+  // ── Only update live display on live packets (throwNum === 0) ──
+  if (throwNum === 0) {
+    liveRPM = rpm;
+    document.getElementById('liveRPM').textContent = rpm.toFixed(0).padStart(3, '0');
+    document.getElementById('rpmBar').style.width = Math.min((rpm / 450) * 100, 100) + '%';
+    targetRoll  = rollDeg  * Math.PI / 180;
+    targetPitch = pitchDeg * Math.PI / 180;
+    document.getElementById('rollVal').textContent  = rollDeg.toFixed(1) + '°';
+    document.getElementById('pitchVal').textContent = pitchDeg.toFixed(1) + '°';
+    return;
   }
+
+  // ── THROW FINALIZED — only process each throw number once ──
+  if (throwNum <= lastSeenThrow) {
+    console.log('[BLE] Duplicate throw packet for throw', throwNum, '— skipping');
+    return;
+  }
+  lastSeenThrow = throwNum;
+  console.log('[BLE] New throw #' + throwNum);
+
+  const lastStr  = parts[3].replace('LAST:', '');
+  const speed    = parseFloat(lastStr.split(',')[0]) || 0;
+  const spinRPM  = parseFloat(lastStr.split(',')[1]) || 0;
+  const angle    = parseFloat(parts[4].replace('ANGLE:', '')) || 10;
+  const avgStr   = parts[5].replace('AVG5:', '');
+  const avgSpeed = parseFloat(avgStr.split(',')[0]) || 0;
+  const maxStr   = parts[6].replace('MAX:', '');
+  const maxSpeed = parseFloat(maxStr.split(',')[0]) || 0;
+
+  console.log('[THROW]', { throwNum, speed, spinRPM, angle, avgSpeed, maxSpeed });
+
+  // Guard: if speed is 0, the frisbee firmware sent garbage — still record but warn
+  if (speed === 0) console.warn('[BLE] Speed is 0 — check firmware velocity integration');
+
+  document.getElementById('last').textContent  = (spinRPM * SPEED_CONSTANT).toFixed(1) + ' mph  /  ' + spinRPM.toFixed(0) + ' rpm';
+  document.getElementById('angle').textContent = angle.toFixed(1) + '°';
+  document.getElementById('avg').textContent   = (avgSpeed).toFixed(1) + ' mph';
+  document.getElementById('max').textContent   = maxSpeed.toFixed(1) + ' mph';
+  document.getElementById('throwCount').textContent = throwNum;
+
+  // Charts
+  const label = '#' + throwNum;
+  speedChart.data.labels.push(label);
+  speedChart.data.datasets[0].data.push(speed);
+  speedChart.update();
+  rpmChart.data.labels.push(label);
+  rpmChart.data.datasets[0].data.push(spinRPM);
+  rpmChart.update();
+
+  // History row
+  document.getElementById('emptyState')?.remove();
+  const row = document.createElement('div');
+  row.className = 'throw-row';
+  row.innerHTML = `
+    <span class="throw-num">THROW ${throwNum}</span>
+    <span class="throw-speed">${speed.toFixed(1)} mph</span>
+    <span class="throw-rpm">${spinRPM.toFixed(0)} rpm</span>
+    <span style="color:var(--muted);font-size:12px">${angle.toFixed(1)}°</span>
+  `;
+  document.getElementById('history').appendChild(row);
+  throwHistory.push({ throw: throwNum, speed, rpm: spinRPM, angle });
+
+  simulateThrow(speed, spinRPM, angle);
 }
 
 
